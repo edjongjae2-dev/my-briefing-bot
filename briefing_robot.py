@@ -70,32 +70,43 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🤖 제미나이 AI (가장 완벽한 표준 주소 + 에러 방어막 장착)
-def get_ai_summary(news_title):
-    if not gemini_key: return "AI 열쇠가 등록되지 않았습니다."
-    try:
-        time.sleep(2) # 과속 방지 2초 휴식
-        
-        prompt = f"경제 뉴스 제목: '{news_title}'. 이 뉴스가 기업이나 시장에 미칠 영향을 딱 1줄(40자 이내)로 핵심만 설명해."
-        
-        # 🌟 가장 안정적인 표준 모델명: gemini-1.5-flash
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
-        headers = {'Content-Type': 'application/json'}
-        
-        res = requests.post(api_url, json=payload, headers=headers, timeout=10)
-        
-        if res.status_code == 200:
-            answer = res.json()['candidates'][0]['content']['parts'][0]['text']
-            return answer.strip().replace('\n', ' ')
-        else:
-            # 🌟 에러가 나더라도 지저분한 영어 대신 깔끔하게 출력!
-            return "기사를 클릭해서 자세한 내용을 확인하세요."
+# 🌟 [핵심] 플랜 A(AI)가 실패하면 플랜 B(기자 요약 훔쳐오기) 작동!
+def get_smart_summary(news_title, news_link):
+    # 1. 플랜 A: 제미나이에게 물어보기
+    if gemini_key:
+        try:
+            time.sleep(1)
+            prompt = f"경제 뉴스 제목: '{news_title}'. 이 뉴스가 미칠 영향을 딱 1줄(40자 이내)로 설명해."
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            headers = {'Content-Type': 'application/json'}
+            res = requests.post(api_url, json=payload, headers=headers, timeout=5)
             
-    except Exception:
-        return "기사를 클릭해서 자세한 내용을 확인하세요."
+            if res.status_code == 200:
+                answer = res.json()['candidates'][0]['content']['parts'][0]['text']
+                return answer.strip().replace('\n', ' ')
+        except:
+            pass # 에러 나면 조용히 플랜 B로 넘어갑니다.
+
+    # 2. 플랜 B: 언론사 홈페이지에서 1줄 요약본 긁어오기
+    try:
+        r = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        s = BeautifulSoup(r.text, 'html.parser')
+        # 기자들이 숨겨둔 요약본(description) 찾기
+        desc = s.find('meta', attrs={'property': 'og:description'}) or s.find('meta', attrs={'name': 'description'})
+        
+        if desc and desc.get('content'):
+            summary = desc.get('content').strip()
+            # 너무 길면 보기 싫으니 60자에서 자르기
+            if len(summary) > 60:
+                summary = summary[:60] + "..."
+            if len(summary) > 5:
+                return summary
+    except:
+        pass
+
+    # 플랜 A, B 모두 실패했을 때만 나오는 최후의 멘트
+    return "기사를 클릭해서 자세한 내용을 확인하세요."
 
 def get_economy_news():
     url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
@@ -111,7 +122,8 @@ def get_economy_news():
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            summary = html.escape(get_ai_summary(clean_title))
+            # 하이브리드 요약 출동!
+            summary = html.escape(get_smart_summary(clean_title, link))
             
             news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
             news_result += f"   💡 <i>{summary}</i>\n\n"
@@ -166,7 +178,8 @@ def get_stocks_and_news():
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            summary = html.escape(get_ai_summary(clean_title))
+            # 하이브리드 요약 출동!
+            summary = html.escape(get_smart_summary(clean_title, link))
             
             result += f"  └ <a href='{link}'>{clean_title}</a>\n"
             result += f"    💡 <i>{summary}</i>\n"
@@ -186,7 +199,7 @@ if __name__ == "__main__":
     eco_news = get_economy_news()
     vip_stocks = get_stocks_and_news()
     
-    briefing = f"🌅 <b>[에드워드 AI 모닝 브리핑]</b>\n\n"
+    briefing = f"🌅 <b>[에드워드 모닝 브리핑]</b>\n\n"
     briefing += f"📍 <b>오늘의 날씨</b>\n{weather_info}\n\n"
     briefing += f"────────────────\n"
     briefing += f"📊 <b>주요 시장 지수</b>\n{market_indices}\n"
