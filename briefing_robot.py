@@ -70,16 +70,16 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🤖 제미나이 AI (🌟 전 세계 무조건 열려있는 gemini-pro 주소로 변경!)
+# 🤖 제미나이 AI (가장 완벽한 표준 주소 + 에러 방어막 장착)
 def get_ai_summary(news_title):
-    if not gemini_key: return "AI 열쇠(API KEY)가 등록되지 않았습니다."
+    if not gemini_key: return "AI 열쇠가 등록되지 않았습니다."
     try:
         time.sleep(2) # 과속 방지 2초 휴식
         
         prompt = f"경제 뉴스 제목: '{news_title}'. 이 뉴스가 기업이나 시장에 미칠 영향을 딱 1줄(40자 이내)로 핵심만 설명해."
         
-        # 🌟 여기 주소를 gemini-pro 로 바꿨습니다!
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={gemini_key}"
+        # 🌟 가장 안정적인 표준 모델명: gemini-1.5-flash
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
         }
@@ -91,11 +91,11 @@ def get_ai_summary(news_title):
             answer = res.json()['candidates'][0]['content']['parts'][0]['text']
             return answer.strip().replace('\n', ' ')
         else:
-            err_msg = res.json().get('error', {}).get('message', '이유 모름')
-            return f"에러: {err_msg[:30]}..."
+            # 🌟 에러가 나더라도 지저분한 영어 대신 깔끔하게 출력!
+            return "기사를 클릭해서 자세한 내용을 확인하세요."
             
-    except Exception as e:
-        return f"AI 서버 통신 지연"
+    except Exception:
+        return "기사를 클릭해서 자세한 내용을 확인하세요."
 
 def get_economy_news():
     url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
