@@ -5,18 +5,12 @@ import xml.etree.ElementTree as ET
 import yfinance as yf
 import html
 from bs4 import BeautifulSoup
-import google.generativeai as genai
 import time 
 
 # 🔐 금고 설정
 token = os.environ.get('TELEGRAM_TOKEN')
 chat_id = os.environ.get('TELEGRAM_CHAT_ID')
 gemini_key = os.environ.get('GEMINI_API_KEY')
-
-# 🧠 제미나이 AI 세팅 (🌟 못 찾던 뇌 대신, 가장 안정적인 gemini-pro로 교체!)
-if gemini_key:
-    genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel('gemini-pro')
 
 # 🎯 나의 관심 리스트
 COMPANIES = {
@@ -76,16 +70,28 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🤖 제미나이 AI 
+# 🤖 제미나이 AI (버그 많은 부품 대신, 다이렉트 직통 전화 통신!)
 def get_ai_summary(news_title):
     if not gemini_key: return "AI 키 없음"
     try:
-        # 과속 방지 3초 휴식
-        time.sleep(3) 
+        time.sleep(3) # 과속 방지 3초 휴식
         
         prompt = f"다음은 경제 기사 제목이야: '{news_title}'. 이 뉴스가 시장이나 해당 기업에 미칠 핵심 영향이나 의미를 딱 1줄(40자 이내)로 알기 쉽게 설명해줘."
-        response = model.generate_content(prompt)
-        return response.text.strip().replace('\n', ' ')
+        
+        # 🌟 구글 서버로 직접 쏘는 완벽한 직통 주소!
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+        
+        res = requests.post(api_url, json=payload, timeout=15)
+        
+        if res.status_code == 200:
+            answer = res.json()['candidates'][0]['content']['parts'][0]['text']
+            return answer.strip().replace('\n', ' ')
+        else:
+            return f"AI 연결 실패 ({res.status_code})"
+            
     except Exception as e:
         error_msg = str(e)[:40] 
         return f"AI 에러: {error_msg}..."
