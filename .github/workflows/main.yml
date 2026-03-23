@@ -1,8 +1,11 @@
-name: Daily Briefing Bot
+name: Daily Briefing
 
 on:
   schedule:
-    - cron: '20 20 * * *'
+    # 한국 시간 오전 7:00 (영국 시간 전날 22:00)
+    - cron: '0 22 * * *'
+    # 한국 시간 오후 3:40 (영국 시간 당일 06:40)
+    - cron: '40 6 * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,13 +20,12 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        # 🌟 여기에 주식(yfinance)과 AI(google-generativeai) 부품을 추가했습니다!
         run: |
-          pip install requests beautifulsoup4 yfinance google-generativeai
+           pip install requests beautifulsoup4 yfinance google-generativeai
 
       - name: Run Briefing Robot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python briefing_robot.py
+        
