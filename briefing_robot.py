@@ -1,22 +1,16 @@
 import requests
+from bs4 import BeautifulSoup
 import os
 import re
 import xml.etree.ElementTree as ET
 import yfinance as yf
 import html
-import time
-import google.generativeai as genai
 
 # 🔐 금고 설정
 token = os.environ.get('TELEGRAM_TOKEN')
 chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-gemini_api_key = os.environ.get('GEMINI_API_KEY')
 
-# 제미나이 AI 두뇌 연결
-if gemini_api_key:
-    genai.configure(api_key=gemini_api_key)
-
-# 🎯 나의 관심 기업 세팅 (요청하신 기업들 완벽 추가!)
+# 🎯 유저님의 관심 기업 리스트!
 COMPANIES = {
     '삼성전자': '005930.KS',
     'SK하이닉스': '000660.KS',
@@ -26,29 +20,6 @@ COMPANIES = {
     '마이크론': 'MU',
     '테슬라': 'TSLA'
 }
-
-# 🤖 AI 요약 로봇 함수
-def get_ai_summary(title, link):
-    if not gemini_api_key:
-        return ""
-    try:
-        # 기사 본문 긁어오기
-        res = requests.get(link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(res.text, 'html.parser')
-        texts = [p.text.strip() for p in soup.find_all('p') if len(p.text.strip()) > 20]
-        content = " ".join(texts)[:1000] # 분석을 위해 앞부분 핵심만 발췌
-        
-        if len(content) < 50: content = title # 막힌 기사면 제목으로만 추론
-            
-        # 제미나이에게 요약 지시!
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"다음 뉴스를 1~2줄로 간결하게 핵심만 요약해줘. 어투는 반드시 '~함', '~임'으로 끝내줘.\n\n뉴스내용: {content}"
-        response = model.generate_content(prompt)
-        time.sleep(2) # AI가 과부하 걸리지 않게 2초 휴식
-        return f"\n   💡 <i>{response.text.strip()}</i>\n"
-    except Exception as e:
-        return f"\n   💡 <i>AI 요약을 불러오지 못했습니다.</i>\n"
 
 # ☀️ 1. 날씨 정보
 def get_weather():
@@ -62,9 +33,32 @@ def get_weather():
             return f"🌡️ 현재 서울: {data}"
         return "날씨 정보를 읽어오는 중입니다.. 🌤️"
     except:
-        return "날씨 정보 오류"
+        return "날씨 정보 연결 일시 오류"
 
-# 📰 2. 일반 경제 뉴스 (2개 + AI 요약)
+# 🌟 [핵심 기능] 기사 링크에 들어가서 '한 줄 요약' 훔쳐오기
+def get_article_summary(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        # 기사 주소로 몰래 접속합니다.
+        res = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        # 언론사가 숨겨둔 '요약본(description)'을 찾습니다.
+        desc = soup.find('meta', attrs={'property': 'og:description'}) or soup.find('meta', attrs={'name': 'description'})
+        
+        if desc and desc.get('content'):
+            summary = desc.get('content').strip()
+            # 요약이 너무 길면 텔레그램이 지저분해지므로 80자에서 자릅니다.
+            if len(summary) > 80:
+                summary = summary[:80] + "..."
+            if len(summary) < 5:
+                return "기사를 클릭해서 자세한 내용을 확인하세요."
+            return summary
+        return "기사를 클릭해서 자세한 내용을 확인하세요."
+    except:
+        return "요약을 제공하지 않는 기사입니다."
+
+# 📰 2. 일반 경제 뉴스 (제목 + 요약)
 def get_economy_news():
     url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -74,52 +68,60 @@ def get_economy_news():
         items = root.findall('.//item')
         
         news_result = ""
-        for item in items[:2]: # 요약글이 길어지므로 가장 중요한 2개만!
+        # 요약을 가져오느라 시간이 조금 걸리므로 핵심 뉴스 2개만 봅니다.
+        for item in items[:2]: 
             title = item.find('title').text.strip()
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>"
-            news_result += get_ai_summary(clean_title, link)
+            # 요약 로봇 출동!
+            summary = html.escape(get_article_summary(link)) 
+            
+            news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
+            news_result += f"   💡 <i>{summary}</i>\n\n"
             
         return news_result
     except Exception as e:
-        return "뉴스 로딩 중 에러가 발생했습니다.\n"
+        return f"뉴스 로딩 중 에러가 발생했습니다."
 
-# 📈 3. 관심 기업 주식 & 관련 뉴스 1개 (AI 요약)
+# 📈 3. 관심 기업 주식 & 관련 뉴스 (제목 + 요약)
 def get_stocks_and_news():
     result = ""
     for name, ticker in COMPANIES.items():
-        # 주식 종가
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period="1d")
-            if not hist.empty:
-                price = hist['Close'].iloc[-1]
-                price_str = f"{int(price):,}원" if str(ticker).endswith(('.KS', '.KQ')) else f"${price:,.2f}"
+            price = hist['Close'].iloc[-1]
+            if str(ticker).endswith('.KS') or str(ticker).endswith('.KQ'):
+                price_str = f"{int(price):,}원"
             else:
-                price_str = "가격 정보 없음"
+                price_str = f"${price:,.2f}"
         except:
-            price_str = "가격 정보 오류"
+            price_str = "가격 확인 불가"
             
-        result += f"\n🏢 <b>{name}</b> (마감: {price_str})\n"
+        result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 기업 관련 최신 뉴스 1개 + 요약
         news_url = f"https://news.google.com/rss/search?q={name}&hl=ko&gl=KR&ceid=KR:ko"
         try:
             res = requests.get(news_url, timeout=10)
             root = ET.fromstring(res.content)
-            item = root.find('.//item')
-            if item is not None:
+            # 종목이 많으므로 종목당 뉴스는 가장 최신 1개씩만!
+            items = root.findall('.//item')[:1] 
+            
+            for item in items:
                 title = item.find('title').text.strip()
                 clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
                 link = item.find('link').text.strip()
                 
-                result += f" 🔹 <a href='{link}'>{clean_title}</a>"
-                result += get_ai_summary(clean_title, link)
+                # 요약 로봇 출동!
+                summary = html.escape(get_article_summary(link))
+                
+                result += f" 🔹 <a href='{link}'>{clean_title}</a>\n"
+                result += f"    └ <i>{summary}</i>\n"
         except:
-            result += " 🔹 뉴스 로딩 실패\n"
-            
+            result += " 🔹 관련 뉴스 로딩 실패\n"
+        result += "\n"
+        
     return result
 
 def send_telegram(message):
@@ -137,12 +139,11 @@ if __name__ == "__main__":
     eco_news = get_economy_news()
     vip_stocks = get_stocks_and_news()
     
-    briefing = f"🌅 <b>[에드워드 AI 모닝 브리핑]</b>\n\n"
+    briefing = f"🌅 <b>[에드워드 모닝 브리핑]</b>\n\n"
     briefing += f"📍 <b>오늘의 날씨</b>\n{weather_info}\n\n"
     briefing += f"────────────────\n"
-    briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}\n"
+    briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}"
     briefing += f"────────────────\n"
-    briefing += f"📈 <b>관심 종목 & AI 브리핑</b>{vip_stocks}"
+    briefing += f"📈 <b>관심 종목 & 관련 뉴스</b>\n\n{vip_stocks}"
     
-    # 텔레그램 글자 수 제한 안전장치
-    send_telegram(briefing[:4000])
+    send_telegram(briefing)
