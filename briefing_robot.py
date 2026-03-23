@@ -6,17 +6,17 @@ import yfinance as yf
 import html
 from bs4 import BeautifulSoup
 import google.generativeai as genai
-import time # 🌟 로봇에게 휴식 시간을 주기 위한 부품 추가!
+import time 
 
 # 🔐 금고 설정
 token = os.environ.get('TELEGRAM_TOKEN')
 chat_id = os.environ.get('TELEGRAM_CHAT_ID')
 gemini_key = os.environ.get('GEMINI_API_KEY')
 
-# 🧠 제미나이 AI 세팅
+# 🧠 제미나이 AI 세팅 (🌟 못 찾던 뇌 대신, 가장 안정적인 gemini-pro로 교체!)
 if gemini_key:
     genai.configure(api_key=gemini_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-pro')
 
 # 🎯 나의 관심 리스트
 COMPANIES = {
@@ -76,18 +76,17 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🤖 제미나이 AI (과속 방지 브레이크 장착!)
+# 🤖 제미나이 AI 
 def get_ai_summary(news_title):
     if not gemini_key: return "AI 키 없음"
     try:
-        # 🌟 너무 빨리 질문해서 튕기는 것을 막기 위해 3초간 숨 고르기
+        # 과속 방지 3초 휴식
         time.sleep(3) 
         
         prompt = f"다음은 경제 기사 제목이야: '{news_title}'. 이 뉴스가 시장이나 해당 기업에 미칠 핵심 영향이나 의미를 딱 1줄(40자 이내)로 알기 쉽게 설명해줘."
         response = model.generate_content(prompt)
         return response.text.strip().replace('\n', ' ')
     except Exception as e:
-        # 🌟 만약 또 에러가 나면 무슨 에러인지 알 수 있게 앞부분을 보여줍니다.
         error_msg = str(e)[:40] 
         return f"AI 에러: {error_msg}..."
 
