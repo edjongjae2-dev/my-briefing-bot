@@ -34,23 +34,40 @@ INDICES = {
     '나스닥': '^IXIC'
 }
 
+# ☀️ 1. 날씨 정보 (현재 날씨 + 시간대별 예보)
 def get_weather():
     try:
-        url = "https://wttr.in/Seoul?format=%t+%C"
-        res = requests.get(url, timeout=10)
-        res.encoding = 'utf-8'
-        if res.status_code == 200:
-            data = res.text.strip().replace("Â", "").replace("Partly cloudy", "구름 조금").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "매우 흐림").replace("Light rain", "약한 비")
-            return f"🌡️ 현재 서울: {data}"
-        return "날씨 로딩 중.."
+        # 현재 날씨
+        url_current = "https://wttr.in/Seoul?format=%t+%C"
+        res_c = requests.get(url_current, timeout=10)
+        res_c.encoding = 'utf-8'
+        current = res_c.text.strip().replace("Â", "").replace("Partly cloudy", "구름 조금").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "매우 흐림").replace("Light rain", "약한 비")
+        
+        # 시간대별 예보 데이터 가져오기 (JSON 방식)
+        url_json = "https://wttr.in/Seoul?format=j1"
+        res_j = requests.get(url_json, timeout=10)
+        hourly_data = res_j.json()['weather'][0]['hourly']
+        
+        forecast = ""
+        for h in hourly_data:
+            time_val = h['time']
+            time_str = "00시" if time_val == "0" else f"{int(time_val)//100:02d}시"
+            
+            # 9시, 12시, 15시, 18시, 21시만 추출
+            if time_str in ["09시", "12시", "15시", "18시", "21시"]:
+                temp = h['tempC']
+                desc = h['weatherDesc'][0]['value'].replace("Partly cloudy", "구름").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "흐림").replace("Sunny", "맑음")
+                forecast += f"\n   ⏱️ {time_str}: {temp}°C ({desc})"
+                
+        return f"🌡️ 현재 서울: {current}\n👇 <b>오늘의 시간별 예보</b>{forecast}"
     except:
-        return "날씨 오류"
+        return "날씨 정보를 불러올 수 없습니다."
 
+# 📊 2. 시장 지수 (등락률 포함)
 def get_market_indices():
     result = ""
     for name, ticker in INDICES.items():
         try:
-            # 안전하게 5일 치를 가져와서 가장 최근 2일 비교
             hist = yf.Ticker(ticker).history(period="5d")
             t_price = hist['Close'].iloc[-1]
             y_price = hist['Close'].iloc[-2]
@@ -64,26 +81,18 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🤖 제미나이 AI: 빈 화면이면 제목으로 추론하기!
-def get_ai_summary(news_url, news_title):
+# 🤖 3. 제미나이 AI (본문 대신 '기사 제목'을 분석해서 1줄 요약)
+def get_ai_summary(news_title):
     if not gemini_key: return "AI 키 없음"
     try:
-        res = requests.get(news_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        paragraphs = soup.find_all('p')
-        article_text = " ".join([p.text for p in paragraphs])[:1000]
-        
-        # 🌟 구글이 막아서 본문이 짧을 경우, 제목을 분석해서 요약하라고 명령합니다!
-        if len(article_text) < 50:
-            prompt = f"다음은 경제 기사 제목이야: '{news_title}'. 이 제목이 뜻하는 핵심 내용이나 경제적 영향을 딱 1줄(40자 이내)로 알기 쉽게 설명해줘."
-        else:
-            prompt = f"다음 뉴스 기사 내용을 딱 1줄(40자 이내)로 핵심만 요약해줘:\n\n{article_text}"
-            
+        # 기사 스크래핑 차단 방지! 제목만 넘겨주고 경제적 의미를 유추시킵니다.
+        prompt = f"다음은 경제 기사 제목이야: '{news_title}'. 이 뉴스가 시장이나 해당 기업에 미칠 핵심 영향이나 의미를 딱 1줄(40자 이내)로 알기 쉽게 설명해줘."
         response = model.generate_content(prompt)
         return response.text.strip().replace('\n', ' ')
     except Exception as e:
-        return "요약을 제공하지 않는 기사입니다."
+        return "요약 생성 중 에러 발생"
 
+# 📰 4. 주요 경제 뉴스
 def get_economy_news():
     url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -98,8 +107,8 @@ def get_economy_news():
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            # AI 요약 함수에 기사 제목도 같이 넘겨줍니다.
-            summary = html.escape(get_ai_summary(link, clean_title))
+            # AI에게 제목만 넘겨줍니다!
+            summary = html.escape(get_ai_summary(clean_title))
             
             news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
             news_result += f"   💡 <i>{summary}</i>\n\n"
@@ -107,10 +116,11 @@ def get_economy_news():
     except:
         return f"뉴스 로딩 중 에러."
 
+# 📈 5. 관심 종목 (등락률 + 수급 + 뉴스)
 def get_stocks_and_news():
     result = ""
     for name, ticker in COMPANIES.items():
-        # 1. 가격 및 등락률 계산
+        # 가격 및 등락률
         try:
             hist = yf.Ticker(ticker).history(period="5d")
             t_price = hist['Close'].iloc[-1]
@@ -129,25 +139,25 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 2. 한국 주식만 네이버 수급 긁어오기
+        # 한국 주식 수급 긁어오기 (외국인/기관)
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
-                n_url = f"https://finance.naver.com/item/investor.naver?code={code}"
+                # 네이버 금융 투자자별 매매동향 페이지
+                n_url = f"https://finance.naver.com/item/frgn.naver?code={code}"
                 n_res = requests.get(n_url, headers={'User-Agent': 'Mozilla/5.0'})
                 n_soup = BeautifulSoup(n_res.text, 'html.parser')
                 
                 rows = n_soup.select('table.type2 tr[onmouseover]')
                 if rows:
                     cols = rows[0].select('td')
-                    ind = cols[1].text.strip() # 개인
-                    fore = cols[2].text.strip() # 외국인
-                    inst = cols[3].text.strip() # 기관
-                    result += f"  👥 수급: 개인 {ind} / 외국인 {fore} / 기관 {inst}\n"
+                    inst = cols[5].text.strip() # 기관 순매매량
+                    fore = cols[6].text.strip() # 외국인 순매매량
+                    result += f"  👥 수급(최근영업일): 외국인 {fore} / 기관 {inst}\n"
             except:
-                result += "  👥 수급: 로딩 실패\n"
+                pass
         
-        # 3. 관련 뉴스 및 요약
+        # 관련 뉴스 및 AI 요약
         news_url = f"https://news.google.com/rss/search?q={name}&hl=ko&gl=KR&ceid=KR:ko"
         try:
             res = requests.get(news_url, timeout=10)
@@ -158,7 +168,8 @@ def get_stocks_and_news():
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            summary = html.escape(get_ai_summary(link, clean_title))
+            # AI에게 제목만 넘겨줍니다!
+            summary = html.escape(get_ai_summary(clean_title))
             
             result += f"  └ <a href='{link}'>{clean_title}</a>\n"
             result += f"    💡 <i>{summary}</i>\n"
