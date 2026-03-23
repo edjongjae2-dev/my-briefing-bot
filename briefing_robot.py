@@ -7,10 +7,10 @@ import html
 from bs4 import BeautifulSoup
 import time 
 
-# 🔐 금고 설정
-token = os.environ.get('TELEGRAM_TOKEN')
-chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-gemini_key = os.environ.get('GEMINI_API_KEY')
+# 🔐 금고 설정 (🌟 보이지 않는 띄어쓰기 공백까지 완벽하게 청소하는 기능 추가!)
+token = os.environ.get('TELEGRAM_TOKEN', '').strip()
+chat_id = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
+gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
 
 # 🎯 나의 관심 리스트
 COMPANIES = {
@@ -70,31 +70,33 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🤖 제미나이 AI (버그 많은 부품 대신, 다이렉트 직통 전화 통신!)
+# 🤖 제미나이 AI (가장 안전한 최신 주소 + 구글 속마음 읽기)
 def get_ai_summary(news_title):
-    if not gemini_key: return "AI 키 없음"
+    if not gemini_key: return "AI 열쇠(API KEY)가 등록되지 않았습니다."
     try:
-        time.sleep(3) # 과속 방지 3초 휴식
+        time.sleep(2) # 과속 방지 2초 휴식
         
-        prompt = f"다음은 경제 기사 제목이야: '{news_title}'. 이 뉴스가 시장이나 해당 기업에 미칠 핵심 영향이나 의미를 딱 1줄(40자 이내)로 알기 쉽게 설명해줘."
+        prompt = f"경제 뉴스 제목: '{news_title}'. 이 뉴스가 기업이나 시장에 미칠 영향을 딱 1줄(40자 이내)로 핵심만 설명해."
         
-        # 🌟 구글 서버로 직접 쏘는 완벽한 직통 주소!
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+        # 🌟 절대 안 바뀌는 구글 최신 AI VIP 직통 주소!
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={gemini_key}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}]
         }
+        headers = {'Content-Type': 'application/json'}
         
-        res = requests.post(api_url, json=payload, timeout=15)
+        res = requests.post(api_url, json=payload, headers=headers, timeout=10)
         
         if res.status_code == 200:
             answer = res.json()['candidates'][0]['content']['parts'][0]['text']
             return answer.strip().replace('\n', ' ')
         else:
-            return f"AI 연결 실패 ({res.status_code})"
+            # 🌟 에러가 나면 구글이 보낸 '진짜 이유'를 화면에 띄웁니다!
+            err_msg = res.json().get('error', {}).get('message', '이유 모름')
+            return f"구글 거절 사유: {err_msg[:30]}..."
             
     except Exception as e:
-        error_msg = str(e)[:40] 
-        return f"AI 에러: {error_msg}..."
+        return f"AI 서버 통신 지연"
 
 def get_economy_news():
     url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
