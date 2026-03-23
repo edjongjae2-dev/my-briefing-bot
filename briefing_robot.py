@@ -70,9 +70,9 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🌟 [핵심] 플랜 A(AI)가 실패하면 플랜 B(기자 요약 훔쳐오기) 작동!
+# 🌟 [핵심] 구글 대기실을 뚫고 진짜 기사 요약을 훔쳐오는 특급 기술!
 def get_smart_summary(news_title, news_link):
-    # 1. 플랜 A: 제미나이에게 물어보기
+    # 1. 플랜 A: 제미나이 AI 시도
     if gemini_key:
         try:
             time.sleep(1)
@@ -86,27 +86,38 @@ def get_smart_summary(news_title, news_link):
                 answer = res.json()['candidates'][0]['content']['parts'][0]['text']
                 return answer.strip().replace('\n', ' ')
         except:
-            pass # 에러 나면 조용히 플랜 B로 넘어갑니다.
+            pass 
 
-    # 2. 플랜 B: 언론사 홈페이지에서 1줄 요약본 긁어오기
+    # 2. 플랜 B: AI가 실패하면 진짜 언론사 홈페이지로 쳐들어가기!
     try:
-        r = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        s = BeautifulSoup(r.text, 'html.parser')
-        # 기자들이 숨겨둔 요약본(description) 찾기
-        desc = s.find('meta', attrs={'property': 'og:description'}) or s.find('meta', attrs={'name': 'description'})
+        # 구글 대기실 접속
+        r1 = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        # 구글 대기실 코드 안에 숨겨진 '진짜 언론사 주소' 찾아내기
+        urls = re.findall(r'href=[\'"]?(https?://[^\'" >]+)', r1.text)
+        real_url = None
+        for u in urls:
+            if 'google.com' not in u and 'policies.google' not in u:
+                real_url = u
+                break
         
-        if desc and desc.get('content'):
-            summary = desc.get('content').strip()
-            # 너무 길면 보기 싫으니 60자에서 자르기
-            if len(summary) > 60:
-                summary = summary[:60] + "..."
-            if len(summary) > 5:
-                return summary
+        # 진짜 언론사 주소를 찾았다면?
+        if real_url:
+            r2 = requests.get(real_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+            s2 = BeautifulSoup(r2.text, 'html.parser')
+            # 기자가 써둔 1줄 요약본 찾기
+            desc = s2.find('meta', attrs={'property': 'og:description'}) or s2.find('meta', attrs={'name': 'description'})
+            
+            if desc and desc.get('content'):
+                summary = desc.get('content').strip()
+                # 이상한 영어(Comprehensive...)가 아니고, 요약이 존재하면 채택!
+                if "Comprehensive" not in summary and len(summary) > 5:
+                    if len(summary) > 65:
+                        return summary[:65] + "..."
+                    return summary
     except:
         pass
 
-    # 플랜 A, B 모두 실패했을 때만 나오는 최후의 멘트
-    return "기사를 클릭해서 자세한 내용을 확인하세요."
+    return "자세한 내용은 링크를 클릭해 주세요."
 
 def get_economy_news():
     url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
@@ -122,7 +133,6 @@ def get_economy_news():
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            # 하이브리드 요약 출동!
             summary = html.escape(get_smart_summary(clean_title, link))
             
             news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
@@ -178,7 +188,6 @@ def get_stocks_and_news():
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            # 하이브리드 요약 출동!
             summary = html.escape(get_smart_summary(clean_title, link))
             
             result += f"  └ <a href='{link}'>{clean_title}</a>\n"
