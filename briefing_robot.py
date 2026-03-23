@@ -50,33 +50,37 @@ def get_market_indices():
     result = ""
     for name, ticker in INDICES.items():
         try:
-            price = yf.Ticker(ticker).history(period="1d")['Close'].iloc[-1]
-            result += f" 🔹 {name}: {price:,.2f}\n"
+            # 안전하게 5일 치를 가져와서 가장 최근 2일 비교
+            hist = yf.Ticker(ticker).history(period="5d")
+            t_price = hist['Close'].iloc[-1]
+            y_price = hist['Close'].iloc[-2]
+            
+            diff = t_price - y_price
+            pct = (diff / y_price) * 100
+            sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
+            
+            result += f" 🔹 {name}: {t_price:,.2f} ({sign}{abs(diff):,.2f}, {pct:+.2f}%)\n"
         except:
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🤖 [핵심] 제미나이 AI에게 기사 1줄 요약 시키기
-def get_ai_summary(news_url):
-    if not gemini_key:
-        return "AI 키가 없어 요약할 수 없습니다."
-    
+# 🤖 제미나이 AI: 빈 화면이면 제목으로 추론하기!
+def get_ai_summary(news_url, news_title):
+    if not gemini_key: return "AI 키 없음"
     try:
-        # 기사 링크에 들어가서 본문 텍스트를 긁어옵니다.
         res = requests.get(news_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         soup = BeautifulSoup(res.text, 'html.parser')
         paragraphs = soup.find_all('p')
-        article_text = " ".join([p.text for p in paragraphs])[:1000] # 앞부분 1000자만
+        article_text = " ".join([p.text for p in paragraphs])[:1000]
         
+        # 🌟 구글이 막아서 본문이 짧을 경우, 제목을 분석해서 요약하라고 명령합니다!
         if len(article_text) < 50:
-            return "본문이 짧아 요약이 어렵습니다."
+            prompt = f"다음은 경제 기사 제목이야: '{news_title}'. 이 제목이 뜻하는 핵심 내용이나 경제적 영향을 딱 1줄(40자 이내)로 알기 쉽게 설명해줘."
+        else:
+            prompt = f"다음 뉴스 기사 내용을 딱 1줄(40자 이내)로 핵심만 요약해줘:\n\n{article_text}"
             
-        # 제미나이에게 명령!
-        prompt = f"다음 뉴스 기사 내용을 딱 1줄(40자 이내)로 핵심만 깔끔하게 요약해줘:\n\n{article_text}"
         response = model.generate_content(prompt)
-        
-        summary = response.text.strip().replace('\n', ' ')
-        return summary
+        return response.text.strip().replace('\n', ' ')
     except Exception as e:
         return "요약을 제공하지 않는 기사입니다."
 
@@ -89,13 +93,13 @@ def get_economy_news():
         items = root.findall('.//item')
         
         news_result = ""
-        for item in items[:2]: # 요약 시간이 걸리므로 탑뉴스 2개만!
+        for item in items[:2]:
             title = item.find('title').text.strip()
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            # AI 요약 함수 출동!
-            summary = html.escape(get_ai_summary(link))
+            # AI 요약 함수에 기사 제목도 같이 넘겨줍니다.
+            summary = html.escape(get_ai_summary(link, clean_title))
             
             news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
             news_result += f"   💡 <i>{summary}</i>\n\n"
@@ -106,26 +110,55 @@ def get_economy_news():
 def get_stocks_and_news():
     result = ""
     for name, ticker in COMPANIES.items():
+        # 1. 가격 및 등락률 계산
         try:
-            price = yf.Ticker(ticker).history(period="1d")['Close'].iloc[-1]
-            price_str = f"{int(price):,}원" if '.KS' in ticker or '.KQ' in ticker else f"${price:,.2f}"
+            hist = yf.Ticker(ticker).history(period="5d")
+            t_price = hist['Close'].iloc[-1]
+            y_price = hist['Close'].iloc[-2]
+            
+            diff = t_price - y_price
+            pct = (diff / y_price) * 100
+            sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
+            
+            if '.KS' in ticker or '.KQ' in ticker:
+                price_str = f"{int(t_price):,}원 ({sign}{int(abs(diff)):,}원, {pct:+.2f}%)"
+            else:
+                price_str = f"${t_price:,.2f} ({sign}${abs(diff):,.2f}, {pct:+.2f}%)"
         except:
             price_str = "확인 불가"
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
+        # 2. 한국 주식만 네이버 수급 긁어오기
+        if '.KS' in ticker or '.KQ' in ticker:
+            try:
+                code = ticker.split('.')[0]
+                n_url = f"https://finance.naver.com/item/investor.naver?code={code}"
+                n_res = requests.get(n_url, headers={'User-Agent': 'Mozilla/5.0'})
+                n_soup = BeautifulSoup(n_res.text, 'html.parser')
+                
+                rows = n_soup.select('table.type2 tr[onmouseover]')
+                if rows:
+                    cols = rows[0].select('td')
+                    ind = cols[1].text.strip() # 개인
+                    fore = cols[2].text.strip() # 외국인
+                    inst = cols[3].text.strip() # 기관
+                    result += f"  👥 수급: 개인 {ind} / 외국인 {fore} / 기관 {inst}\n"
+            except:
+                result += "  👥 수급: 로딩 실패\n"
+        
+        # 3. 관련 뉴스 및 요약
         news_url = f"https://news.google.com/rss/search?q={name}&hl=ko&gl=KR&ceid=KR:ko"
         try:
             res = requests.get(news_url, timeout=10)
             root = ET.fromstring(res.content)
-            item = root.findall('.//item')[0] # 1개만
+            item = root.findall('.//item')[0]
             
             title = item.find('title').text.strip()
             clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
             link = item.find('link').text.strip()
             
-            # AI 요약 함수 출동!
-            summary = html.escape(get_ai_summary(link))
+            summary = html.escape(get_ai_summary(link, clean_title))
             
             result += f"  └ <a href='{link}'>{clean_title}</a>\n"
             result += f"    💡 <i>{summary}</i>\n"
