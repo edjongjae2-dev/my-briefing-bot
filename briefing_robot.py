@@ -1,16 +1,13 @@
 import requests
 import os
-import re
 import xml.etree.ElementTree as ET
 import yfinance as yf
 import html
 from bs4 import BeautifulSoup
-import time 
 
 # 🔐 금고 설정
 token = os.environ.get('TELEGRAM_TOKEN', '').strip()
 chat_id = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
-gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
 
 # 🎯 나의 관심 리스트
 COMPANIES = {
@@ -70,76 +67,48 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🌟 [핵심] 구글 대기실을 뚫고 진짜 기사 요약을 훔쳐오는 특급 기술!
-def get_smart_summary(news_title, news_link):
-    # 1. 플랜 A: 제미나이 AI 시도
-    if gemini_key:
-        try:
-            time.sleep(1)
-            prompt = f"경제 뉴스 제목: '{news_title}'. 이 뉴스가 미칠 영향을 딱 1줄(40자 이내)로 설명해."
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            headers = {'Content-Type': 'application/json'}
-            res = requests.post(api_url, json=payload, headers=headers, timeout=5)
-            
-            if res.status_code == 200:
-                answer = res.json()['candidates'][0]['content']['parts'][0]['text']
-                return answer.strip().replace('\n', ' ')
-        except:
-            pass 
-
-    # 2. 플랜 B: AI가 실패하면 진짜 언론사 홈페이지로 쳐들어가기!
+# 🌟 [핵심] 네이버 뉴스 검색결과에서 요약본을 바로 주워오는 마법!
+def get_naver_news(query, is_main=False):
+    url = f"https://search.naver.com/search.naver?where=news&query={query}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+    news_result = ""
     try:
-        # 구글 대기실 접속
-        r1 = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        # 구글 대기실 코드 안에 숨겨진 '진짜 언론사 주소' 찾아내기
-        urls = re.findall(r'href=[\'"]?(https?://[^\'" >]+)', r1.text)
-        real_url = None
-        for u in urls:
-            if 'google.com' not in u and 'policies.google' not in u:
-                real_url = u
-                break
+        res = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        articles = soup.select('.news_area')
         
-        # 진짜 언론사 주소를 찾았다면?
-        if real_url:
-            r2 = requests.get(real_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-            s2 = BeautifulSoup(r2.text, 'html.parser')
-            # 기자가 써둔 1줄 요약본 찾기
-            desc = s2.find('meta', attrs={'property': 'og:description'}) or s2.find('meta', attrs={'name': 'description'})
+        count = 2 if is_main else 1 # 메인 뉴스는 2개, 종목 뉴스는 1개
+        
+        for article in articles[:count]:
+            # 기사 제목과 링크 훔쳐오기
+            title_tag = article.select_one('.news_tit')
+            if not title_tag: continue
+            title = title_tag.text.strip()
+            link = title_tag['href']
             
-            if desc and desc.get('content'):
-                summary = desc.get('content').strip()
-                # 이상한 영어(Comprehensive...)가 아니고, 요약이 존재하면 채택!
-                if "Comprehensive" not in summary and len(summary) > 5:
-                    if len(summary) > 65:
-                        return summary[:65] + "..."
-                    return summary
+            # 네이버 화면에 적혀있는 1줄 요약 훔쳐오기
+            desc_tag = article.select_one('.api_txt_lines.dsc_txt_wrap')
+            summary = desc_tag.text.strip() if desc_tag else "자세한 내용은 기사를 클릭하세요."
+            if len(summary) > 60:
+                summary = summary[:60] + "..."
+                
+            clean_title = html.escape(title)
+            clean_summary = html.escape(summary)
+            
+            if is_main:
+                news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
+                news_result += f"   💡 <i>{clean_summary}</i>\n\n"
+            else:
+                news_result += f"  └ <a href='{link}'>{clean_title}</a>\n"
+                news_result += f"    💡 <i>{clean_summary}</i>\n"
+                
+        return news_result if news_result else "뉴스를 찾을 수 없습니다.\n"
     except:
-        pass
-
-    return "자세한 내용은 링크를 클릭해 주세요."
+        return "뉴스 로딩 실패\n"
 
 def get_economy_news():
-    url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    try:
-        res = requests.get(url, headers=headers, timeout=15)
-        root = ET.fromstring(res.content)
-        items = root.findall('.//item')
-        
-        news_result = ""
-        for item in items[:2]:
-            title = item.find('title').text.strip()
-            clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
-            link = item.find('link').text.strip()
-            
-            summary = html.escape(get_smart_summary(clean_title, link))
-            
-            news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
-            news_result += f"   💡 <i>{summary}</i>\n\n"
-        return news_result
-    except:
-        return f"뉴스 로딩 중 에러."
+    # 네이버에 '증시 경제 종합'이라고 검색한 결과를 가져옵니다.
+    return get_naver_news("증시 경제 종합", is_main=True)
 
 def get_stocks_and_news():
     result = ""
@@ -162,6 +131,7 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
+        # 한국 주식 수급(외국인/기관) 긁어오기
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
@@ -178,23 +148,10 @@ def get_stocks_and_news():
             except:
                 pass
         
-        news_url = f"https://news.google.com/rss/search?q={name}&hl=ko&gl=KR&ceid=KR:ko"
-        try:
-            res = requests.get(news_url, timeout=10)
-            root = ET.fromstring(res.content)
-            item = root.findall('.//item')[0]
-            
-            title = item.find('title').text.strip()
-            clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
-            link = item.find('link').text.strip()
-            
-            summary = html.escape(get_smart_summary(clean_title, link))
-            
-            result += f"  └ <a href='{link}'>{clean_title}</a>\n"
-            result += f"    💡 <i>{summary}</i>\n"
-        except:
-            result += "  └ 관련 뉴스 로딩 실패\n"
+        # 종목별 뉴스 1개 긁어오기 (네이버 뉴스 활용!)
+        result += get_naver_news(name, is_main=False)
         result += "\n"
+        
     return result
 
 def send_telegram(message):
