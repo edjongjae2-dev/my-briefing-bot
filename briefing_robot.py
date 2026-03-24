@@ -28,11 +28,11 @@ INDICES = {
     'S&P 500': '^GSPC', 
     '나스닥': '^IXIC'
 }
-# 🪙 코인 리스트 추가
+# 🪙 코인 리스트 (원화 KRW 기준으로 변경!)
 CRYPTOS = {
-    '비트코인': 'BTC-USD',
-    '이더리움': 'ETH-USD',
-    '솔라나': 'SOL-USD'
+    '비트코인': 'BTC-KRW',
+    '이더리움': 'ETH-KRW',
+    '솔라나': 'SOL-KRW'
 }
 
 def get_weather():
@@ -76,7 +76,7 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🪙 코인 정보 가져오는 함수 추가
+# 🪙 코인 정보 가져오는 함수 (원화 표시로 수정)
 def get_crypto_prices():
     result = ""
     for name, ticker in CRYPTOS.items():
@@ -89,13 +89,13 @@ def get_crypto_prices():
             pct = (diff / y_price) * 100
             sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
             
-            result += f" 🔹 {name}: ${t_price:,.2f} ({sign}${abs(diff):,.2f}, {pct:+.2f}%)\n"
+            # 원화는 금액이 크므로 int()를 씌워서 소수점을 없애고 깔끔하게 표현합니다.
+            result += f" 🔹 {name}: {int(t_price):,}원 ({sign}{abs(int(diff)):,}원, {pct:+.2f}%)\n"
         except:
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
 def get_smart_summary(news_title, news_link):
-    # 1. 플랜 A: 제미나이 AI 시도
     if gemini_key:
         try:
             time.sleep(1)
@@ -111,7 +111,6 @@ def get_smart_summary(news_title, news_link):
         except:
             pass 
 
-    # 2. 플랜 B: 직접 추출
     try:
         r1 = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         urls = re.findall(r'href=[\'"]?(https?://[^\'" >]+)', r1.text)
@@ -164,7 +163,6 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 개인 수급 데이터 포함 로직
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
@@ -181,7 +179,6 @@ def get_stocks_and_news():
             except:
                 pass
         
-        # 구글 뉴스 링크 및 AI 요약
         news_url = f"https://news.google.com/rss/search?q={name}&hl=ko&gl=KR&ceid=KR:ko"
         try:
             res = requests.get(news_url, timeout=10)
@@ -206,7 +203,7 @@ def send_telegram(message):
 if __name__ == "__main__":
     weather_info = get_weather()
     market_indices = get_market_indices()
-    crypto_prices = get_crypto_prices() # 🪙 코인 정보 가져오기 실행
+    crypto_prices = get_crypto_prices() # 🪙 코인 정보
     eco_news = get_economy_news()
     vip_stocks = get_stocks_and_news()
     
@@ -215,7 +212,7 @@ if __name__ == "__main__":
     briefing += f"────────────────\n"
     briefing += f"📊 <b>주요 시장 지수</b>\n{market_indices}\n"
     briefing += f"────────────────\n"
-    briefing += f"🪙 <b>주요 암호화폐</b>\n{crypto_prices}\n" # 🪙 코인 정보 추가
+    briefing += f"🪙 <b>주요 암호화폐</b>\n{crypto_prices}\n"
     briefing += f"────────────────\n"
     briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}\n"
     briefing += f"────────────────\n"
