@@ -70,9 +70,8 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🌟 [핵심] 구글 대기실을 뚫고 진짜 기사 요약을 훔쳐오는 특급 기술!
+# 🌟 [핵심] 구글 대기실 뚫고 요약 가져오기
 def get_smart_summary(news_title, news_link):
-    # 1. 플랜 A: 제미나이 AI 시도
     if gemini_key:
         try:
             time.sleep(1)
@@ -88,7 +87,6 @@ def get_smart_summary(news_title, news_link):
         except:
             pass 
 
-    # 2. 플랜 B: AI가 실패하면 진짜 언론사 홈페이지로 쳐들어가기!
     try:
         r1 = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         urls = re.findall(r'href=[\'"]?(https?://[^\'" >]+)', r1.text)
@@ -157,20 +155,24 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
+        # 🌟 [업그레이드 포인트] '투자자별 매매동향' 페이지에서 진짜 수급(수량) 가져오기
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
-                n_url = f"https://finance.naver.com/item/frgn.naver?code={code}"
+                # 기존 frgn.naver 대신 sise_investor.naver 로 접속!
+                n_url = f"https://finance.naver.com/item/sise_investor.naver?code={code}"
                 n_res = requests.get(n_url, headers={'User-Agent': 'Mozilla/5.0'})
                 n_soup = BeautifulSoup(n_res.text, 'html.parser')
                 
                 rows = n_soup.select('table.type2 tr[onmouseover]')
                 if rows:
                     cols = rows[0].select('td')
-                    ant = cols[4].text.strip()   # 개인
-                    inst = cols[5].text.strip()  # 기관
-                    fore = cols[6].text.strip()  # 외국인
-                    result += f"   👥 수급: 개인 {ant} / 외국인 {fore} / 기관 {inst}\n"
+                    # sise_investor 표 순서: 1(개인), 2(외국인), 3(기관)
+                    ant = cols[1].text.strip()   # 진짜 개인 순매매량
+                    fore = cols[2].text.strip()  # 진짜 외국인 순매매량
+                    inst = cols[3].text.strip()  # 진짜 기관 순매매량
+                    
+                    result += f"   👥 수급: 개인 {ant}주 / 외국인 {fore}주 / 기관 {inst}주\n"
             except:
                 pass
         
