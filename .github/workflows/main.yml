@@ -2,10 +2,14 @@ name: Daily Briefing
 
 on:
   schedule:
-    # 한국 시간 오전 7:00 배달 (영국 시간 전날 22:00)
-    - cron: '0 22 * * *'
-    # 한국 시간 오후 3:40 배달 (영국 시간 당일 06:40)
-    - cron: '40 6 * * *'
+    # 1. 한국 시간 오전 06:42 배달 (기존 7시에서 1시간 앞당김 + 지연 대비 20분 추가 확보)
+    # 영국 시간(UTC) 전날 21:42
+    - cron: '42 21 * * *'
+    
+    # 2. 한국 시간 오후 03:17 배달 (기존 3시 40분에서 조금 앞당김)
+    # 영국 시간(UTC) 당일 06:17
+    - cron: '17 6 * * *'
+    
   workflow_dispatch:
 
 jobs:
@@ -20,14 +24,13 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        # 🌟 여기에 AI 부품(google-generativeai)을 추가했습니다!
         run: |
+          python -m pip install --upgrade pip
           pip install requests beautifulsoup4 yfinance google-generativeai
 
       - name: Run Briefing Robot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # 🌟 금고에서 제미나이 열쇠를 꺼내오는 명령!
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python briefing_robot.py
