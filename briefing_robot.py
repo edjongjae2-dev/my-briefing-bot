@@ -1,88 +1,177 @@
 import requests
 import os
+import re
+import xml.etree.ElementTree as ET
 import yfinance as yf
 import html
 from bs4 import BeautifulSoup
+import time 
 
 # 🔐 금고 설정
 token = os.environ.get('TELEGRAM_TOKEN', '').strip()
 chat_id = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
+gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
 
-# 🎯 나의 관심 리스트 (종목명: [야후티커, 네이버코드])
+# 🎯 나의 관심 리스트
 COMPANIES = {
-    '삼성전자': ['005930.KS', '005930'],
-    'SK하이닉스': ['000660.KS', '000660'],
-    '한미반도체': ['042700.KS', '042700'],
-    '애플': ['AAPL', 'AAPL'],
-    '엔비디아': ['NVDA', 'NVDA'],
-    '마이크론': ['MU', 'MU'],
-    '테슬라': ['TSLA', 'TSLA']
+    '삼성전자': '005930.KS', 
+    'SK하이닉스': '000660.KS', 
+    '한미반도체': '042700.KS', 
+    '애플': 'AAPL', 
+    '엔비디아': 'NVDA', 
+    '마이크론': 'MU', 
+    '테슬라': 'TSLA'
 }
 INDICES = {
-    '코스피': '^KS11', '코스닥': '^KQ11', 'S&P 500': '^GSPC', '나스닥': '^IXIC'
+    '코스피': '^KS11', 
+    '코스닥': '^KQ11', 
+    'S&P 500': '^GSPC', 
+    '나스닥': '^IXIC'
 }
 
 def get_weather():
     try:
-        url = "https://wttr.in/Seoul?format=%t+%C"
-        res = requests.get(url, timeout=10)
-        res.encoding = 'utf-8'
-        return f"🌡️ 현재 서울: {res.text.strip().replace('Â', '')}"
+        url_current = "https://wttr.in/Seoul?format=%t+%C"
+        res_c = requests.get(url_current, timeout=10)
+        res_c.encoding = 'utf-8'
+        current = res_c.text.strip().replace("Â", "").replace("Partly cloudy", "구름 조금").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "매우 흐림").replace("Light rain", "약한 비")
+        
+        url_json = "https://wttr.in/Seoul?format=j1"
+        res_j = requests.get(url_json, timeout=10)
+        hourly_data = res_j.json()['weather'][0]['hourly']
+        
+        forecast = ""
+        for h in hourly_data:
+            time_val = h['time']
+            time_str = "00시" if time_val == "0" else f"{int(time_val)//100:02d}시"
+            if time_str in ["09시", "12시", "15시", "18시", "21시"]:
+                temp = h['tempC']
+                desc = h['weatherDesc'][0]['value'].replace("Partly cloudy", "구름").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "흐림").replace("Sunny", "맑음")
+                forecast += f"\n    ⏱️ {time_str}: {temp}°C ({desc})"
+                
+        return f"🌡️ 현재 서울: {current}\n👇 <b>오늘의 시간별 예보</b>{forecast}"
     except:
-        return "날씨 정보 확인 불가"
+        return "날씨 정보를 불러올 수 없습니다."
 
 def get_market_indices():
     result = ""
     for name, ticker in INDICES.items():
         try:
             hist = yf.Ticker(ticker).history(period="5d")
-            t_price, y_price = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
-            diff, pct = t_price - y_price, ((t_price - y_price) / y_price) * 100
+            t_price = hist['Close'].iloc[-1]
+            y_price = hist['Close'].iloc[-2]
+            
+            diff = t_price - y_price
+            pct = (diff / y_price) * 100
             sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
+            
             result += f" 🔹 {name}: {t_price:,.2f} ({sign}{abs(diff):,.2f}, {pct:+.2f}%)\n"
         except:
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
+def get_smart_summary(news_title, news_link):
+    # 1. 플랜 A: 제미나이 AI 시도
+    if gemini_key:
+        try:
+            time.sleep(1)
+            prompt = f"경제 뉴스 제목: '{news_title}'. 이 뉴스가 미칠 영향을 딱 1줄(40자 이내)로 설명해."
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            headers = {'Content-Type': 'application/json'}
+            res = requests.post(api_url, json=payload, headers=headers, timeout=5)
+            
+            if res.status_code == 200:
+                answer = res.json()['candidates'][0]['content']['parts'][0]['text']
+                return answer.strip().replace('\n', ' ')
+        except:
+            pass 
+
+    # 2. 플랜 B: 직접 추출
+    try:
+        r1 = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        urls = re.findall(r'href=[\'"]?(https?://[^\'" >]+)', r1.text)
+        real_url = next((u for u in urls if 'google.com' not in u and 'policies.google' not in u), None)
+        
+        if real_url:
+            r2 = requests.get(real_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+            s2 = BeautifulSoup(r2.text, 'html.parser')
+            desc = s2.find('meta', attrs={'property': 'og:description'}) or s2.find('meta', attrs={'name': 'description'})
+            
+            if desc and desc.get('content'):
+                summary = desc.get('content').strip()
+                if "Comprehensive" not in summary and len(summary) > 5:
+                    return summary[:65] + "..." if len(summary) > 65 else summary
+    except:
+        pass
+    return "상세 내용은 기사 링크를 참조해 주세요."
+
+def get_economy_news():
+    url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
+    try:
+        res = requests.get(url, timeout=15)
+        root = ET.fromstring(res.content)
+        items = root.findall('.//item')
+        
+        news_result = ""
+        for item in items[:2]:
+            title = item.find('title').text.strip()
+            clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
+            link = item.find('link').text.strip()
+            summary = html.escape(get_smart_summary(clean_title, link))
+            news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
+            news_result += f"    💡 <i>{summary}</i>\n\n"
+        return news_result
+    except:
+        return f"뉴스 로딩 실패"
+
 def get_stocks_and_news():
     result = ""
-    for name, info in COMPANIES.items():
-        ticker, code = info[0], info[1]
+    for name, ticker in COMPANIES.items():
         try:
             hist = yf.Ticker(ticker).history(period="5d")
             t_price, y_price = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
-            diff, pct = t_price - y_price, ((t_price - y_price) / y_price) * 100
+            diff, pct = t_price - y_price, (t_price - y_price) / y_price * 100
             sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
-            
-            if '.KS' in ticker or '.KQ' in ticker:
-                price_str = f"{int(t_price):,}원 ({sign}{int(abs(diff)):,}원, {pct:+.2f}%)"
-            else:
-                price_str = f"${t_price:,.2f} ({sign}${abs(diff):,.2f}, {pct:+.2f}%)"
+            price_str = f"{int(t_price):,}원" if '.KS' in ticker or '.KQ' in ticker else f"${t_price:,.2f}"
+            price_str += f" ({sign}{abs(diff):,.2f}, {pct:+.2f}%)"
         except:
             price_str = "확인 불가"
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 👥 수급 데이터 (한국 종목만)
+        # 🟢 [수정됨] 개인 수급 데이터 포함 로직
         if '.KS' in ticker or '.KQ' in ticker:
             try:
+                code = ticker.split('.')[0]
                 n_url = f"https://finance.naver.com/item/frgn.naver?code={code}"
                 n_res = requests.get(n_url, headers={'User-Agent': 'Mozilla/5.0'})
                 n_soup = BeautifulSoup(n_res.text, 'html.parser')
-                row = n_soup.select('table.type2 tr[onmouseover]')[0].select('td')
-                ant, inst, fore = row[4].text.strip(), row[5].text.strip(), row[6].text.strip()
-                result += f"   👥 수급: 개인 {ant} / 외인 {fore} / 기관 {inst}\n"
+                rows = n_soup.select('table.type2 tr[onmouseover]')
+                if rows:
+                    cols = rows[0].select('td')
+                    ant = cols[4].text.strip()   # 개인
+                    inst = cols[5].text.strip()  # 기관
+                    fore = cols[6].text.strip()  # 외국인
+                    result += f"   👥 수급: 개인 {ant} / 외국인 {fore} / 기관 {inst}\n"
             except:
                 pass
         
-        # 🔗 [핵심] 절대 안 막히는 직통 뉴스 링크 생성
-        if '.KS' in ticker or '.KQ' in ticker:
-            news_link = f"https://finance.naver.com/item/news.naver?code={code}"
-        else:
-            news_link = f"https://www.google.com/search?q={name}+stock+news&tbm=nws"
-        
-        result += f"   🔗 <a href='{news_link}'>[{name}] 실시간 뉴스 확인하기</a>\n\n"
-        
+        # 구글 뉴스 링크 및 AI 요약
+        news_url = f"https://news.google.com/rss/search?q={name}&hl=ko&gl=KR&ceid=KR:ko"
+        try:
+            res = requests.get(news_url, timeout=10)
+            root = ET.fromstring(res.content)
+            item = root.findall('.//item')[0]
+            title = item.find('title').text.strip()
+            clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
+            link = item.find('link').text.strip()
+            summary = html.escape(get_smart_summary(clean_title, link))
+            result += f"   └ <a href='{link}'>{clean_title}</a>\n"
+            result += f"     💡 <i>{summary}</i>\n"
+        except:
+            result += "   └ 관련 뉴스 로딩 실패\n"
+        result += "\n"
     return result
 
 def send_telegram(message):
@@ -91,22 +180,18 @@ def send_telegram(message):
     requests.post(url, json=payload)
 
 if __name__ == "__main__":
-    weather = get_weather()
-    indices = get_market_indices()
-    stocks = get_stocks_and_news()
+    weather_info = get_weather()
+    market_indices = get_market_indices()
+    eco_news = get_economy_news()
+    vip_stocks = get_stocks_and_news()
     
-    # 종합 경제 시황 링크
-    eco_news_link = "https://news.naver.com/main/main.naver?mode=LSD&mid=shm&sid1=101"
+    briefing = f"🌅 <b>[에드워드 모닝 브리핑]</b>\n\n"
+    briefing += f"📍 <b>오늘의 날씨</b>\n{weather_info}\n\n"
+    briefing += f"────────────────\n"
+    briefing += f"📊 <b>주요 시장 지수</b>\n{market_indices}\n"
+    briefing += f"────────────────\n"
+    briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}"
+    briefing += f"────────────────\n"
+    briefing += f"📈 <b>관심 종목 & 관련 뉴스</b>\n\n{vip_stocks}"
     
-    briefing = (
-        f"🌅 <b>[에드워드 모닝 브리핑]</b>\n\n"
-        f"📍 <b>오늘의 날씨</b>\n{weather}\n\n"
-        f"────────────────\n"
-        f"📊 <b>주요 시장 지수</b>\n{indices}\n"
-        f"────────────────\n"
-        f"📰 <b>경제 시황 종합</b>\n"
-        f"▪️ <a href='{eco_news_link}'>네이버 경제 주요뉴스 바로가기</a>\n"
-        f"────────────────\n"
-        f"📈 <b>관심 종목 & 수급 현황</b>\n\n{stocks}"
-    )
     send_telegram(briefing)
