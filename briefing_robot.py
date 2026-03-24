@@ -67,51 +67,44 @@ def get_market_indices():
     return result
 
 def get_naver_news(query, is_main=False):
-    # 검색 정확도를 높이기 위해 쿼리 조정
-    url = f"https://search.naver.com/search.naver?where=news&query={query}&sort=0"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+    # 뉴스 탭 검색 결과 주소
+    url = f"https://search.naver.com/search.naver?where=news&query={query}&sm=tab_pge&sort=0"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.naver.com'
+    }
     news_result = ""
     try:
         res = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
-        # 뉴스 아이템을 잡는 선택자를 더 포괄적으로 변경
-        articles = soup.select('.news_wrap, .news_area')
+        
+        # 네이버 뉴스 제목을 가진 클래스 타겟팅
+        titles = soup.select('a.news_tit')
         
         count = 2 if is_main else 1
         found = 0
         
-        for article in articles:
+        for title_tag in titles:
             if found >= count: break
-            
-            title_tag = article.select_one('.news_tit')
-            if not title_tag: continue
             
             title = title_tag.text.strip()
             link = title_tag['href']
             
-            # 요약 설명 부분 추출 (클래스명이 다를 수 있어 여러 개 시도)
-            desc_tag = article.select_one('.api_txt_lines.dsc_txt_wrap') or article.select_one('.news_dsc')
-            summary = desc_tag.text.strip() if desc_tag else "상세 내용은 기사를 확인하세요."
-            if len(summary) > 70:
-                summary = summary[:70] + "..."
-                
+            # 요약(desc) 생략하고 제목과 링크에 집중 (안정성 확보)
             clean_title = html.escape(title)
-            clean_summary = html.escape(summary)
             
             if is_main:
-                news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
-                news_result += f"    💡 <i>{clean_summary}</i>\n\n"
+                news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n\n"
             else:
                 news_result += f"   └ <a href='{link}'>{clean_title}</a>\n"
-                news_result += f"     💡 <i>{clean_summary}</i>\n"
             found += 1
                 
-        return news_result if news_result else "뉴스 로딩 중 (검색 결과 없음)\n"
+        return news_result if news_result else "📰 최신 뉴스 링크 확인 중...\n"
     except:
         return "뉴스 정보 연결 실패\n"
 
 def get_economy_news():
-    return get_naver_news("경제 금융 주요뉴스", is_main=True)
+    return get_naver_news("경제 증시 시황", is_main=True)
 
 def get_stocks_and_news():
     result = ""
@@ -134,7 +127,7 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 한국 주식 수급(개인/외국인/기관) 가져오기
+        # 한국 주식 수급(개인/외국인/기관)
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
@@ -145,7 +138,6 @@ def get_stocks_and_news():
                 rows = n_soup.select('table.type2 tr[onmouseover]')
                 if rows:
                     cols = rows[0].select('td')
-                    # 네이버 금융 수급 표 순서: 4(개인), 5(기관), 6(외국인)
                     ant = cols[4].text.strip()   # 개인
                     inst = cols[5].text.strip()  # 기관
                     fore = cols[6].text.strip()  # 외국인
@@ -153,15 +145,13 @@ def get_stocks_and_news():
             except:
                 pass
         
+        # 종목 뉴스 추가
         result += get_naver_news(name, is_main=False)
         result += "\n"
         
     return result
 
 def send_telegram(message):
-    if not token or not chat_id:
-        print("토큰이나 채팅 ID가 설정되지 않았습니다.")
-        return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     requests.post(url, json=payload)
