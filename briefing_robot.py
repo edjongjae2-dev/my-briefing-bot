@@ -28,6 +28,12 @@ INDICES = {
     'S&P 500': '^GSPC', 
     '나스닥': '^IXIC'
 }
+# 🪙 코인 리스트 추가
+CRYPTOS = {
+    '비트코인': 'BTC-USD',
+    '이더리움': 'ETH-USD',
+    '솔라나': 'SOL-USD'
+}
 
 def get_weather():
     try:
@@ -66,6 +72,24 @@ def get_market_indices():
             sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
             
             result += f" 🔹 {name}: {t_price:,.2f} ({sign}{abs(diff):,.2f}, {pct:+.2f}%)\n"
+        except:
+            result += f" 🔹 {name}: 확인 불가\n"
+    return result
+
+# 🪙 코인 정보 가져오는 함수 추가
+def get_crypto_prices():
+    result = ""
+    for name, ticker in CRYPTOS.items():
+        try:
+            hist = yf.Ticker(ticker).history(period="5d")
+            t_price = hist['Close'].iloc[-1]
+            y_price = hist['Close'].iloc[-2]
+            
+            diff = t_price - y_price
+            pct = (diff / y_price) * 100
+            sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
+            
+            result += f" 🔹 {name}: ${t_price:,.2f} ({sign}${abs(diff):,.2f}, {pct:+.2f}%)\n"
         except:
             result += f" 🔹 {name}: 확인 불가\n"
     return result
@@ -140,7 +164,7 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 🟢 [수정됨] 개인 수급 데이터 포함 로직
+        # 개인 수급 데이터 포함 로직
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
@@ -182,6 +206,7 @@ def send_telegram(message):
 if __name__ == "__main__":
     weather_info = get_weather()
     market_indices = get_market_indices()
+    crypto_prices = get_crypto_prices() # 🪙 코인 정보 가져오기 실행
     eco_news = get_economy_news()
     vip_stocks = get_stocks_and_news()
     
@@ -190,7 +215,9 @@ if __name__ == "__main__":
     briefing += f"────────────────\n"
     briefing += f"📊 <b>주요 시장 지수</b>\n{market_indices}\n"
     briefing += f"────────────────\n"
-    briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}"
+    briefing += f"🪙 <b>주요 암호화폐</b>\n{crypto_prices}\n" # 🪙 코인 정보 추가
+    briefing += f"────────────────\n"
+    briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}\n"
     briefing += f"────────────────\n"
     briefing += f"📈 <b>관심 종목 & 관련 뉴스</b>\n\n{vip_stocks}"
     
