@@ -31,21 +31,7 @@ def get_weather():
         res_c = requests.get(url_current, timeout=10)
         res_c.encoding = 'utf-8'
         current = res_c.text.strip().replace("Â", "").replace("Partly cloudy", "구름 조금").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "매우 흐림").replace("Light rain", "약한 비")
-        
-        url_json = "https://wttr.in/Seoul?format=j1"
-        res_j = requests.get(url_json, timeout=10)
-        hourly_data = res_j.json()['weather'][0]['hourly']
-        
-        forecast = ""
-        for h in hourly_data:
-            time_val = h['time']
-            time_str = "00시" if time_val == "0" else f"{int(time_val)//100:02d}시"
-            if time_str in ["09시", "12시", "15시", "18시", "21시"]:
-                temp = h['tempC']
-                desc = h['weatherDesc'][0]['value'].replace("Partly cloudy", "구름").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "흐림").replace("Sunny", "맑음")
-                forecast += f"\n    ⏱️ {time_str}: {temp}°C ({desc})"
-                
-        return f"🌡️ 현재 서울: {current}\n👇 <b>오늘의 시간별 예보</b>{forecast}"
+        return f"🌡️ 현재 서울: {current}"
     except:
         return "날씨 정보를 불러올 수 없습니다."
 
@@ -56,44 +42,30 @@ def get_market_indices():
             hist = yf.Ticker(ticker).history(period="5d")
             t_price = hist['Close'].iloc[-1]
             y_price = hist['Close'].iloc[-2]
-            
             diff = t_price - y_price
             pct = (diff / y_price) * 100
             sign = "▲" if diff > 0 else "▼" if diff < 0 else "-"
-            
             result += f" 🔹 {name}: {t_price:,.2f} ({sign}{abs(diff):,.2f}, {pct:+.2f}%)\n"
         except:
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-def get_naver_news(query, is_main=False):
-    url = f"https://search.naver.com/search.naver?where=news&query={query}&sort=0"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    news_result = ""
+# 🌟 구글 뉴스 RSS를 사용하여 안정적으로 뉴스 가져오기
+def get_google_news(query, count=1):
+    url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
     try:
-        res = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        titles = soup.select('a.news_tit')
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.content, "xml")
+        items = soup.find_all("item")
         
-        count = 2 if is_main else 1
-        found = 0
-        for title_tag in titles:
-            if found >= count: break
-            title = title_tag.text.strip()
-            link = title_tag['href']
-            clean_title = html.escape(title)
-            
-            if is_main:
-                news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n\n"
-            else:
-                news_result += f"   └ <a href='{link}'>{clean_title}</a>\n"
-                news_result += f"     💡 <i>자세한 내용은 링크를 클릭해 주세요.</i>\n"
-            found += 1
-        return news_result if news_result else "📰 최신 뉴스 확인 중...\n"
+        news_text = ""
+        for item in items[:count]:
+            title = item.title.text.replace(" - " + item.source.text, "").strip()
+            link = item.link.text
+            news_text += f"   └ <a href='{link}'>{html.escape(title)}</a>\n"
+        return news_text if news_text else "   └ 최신 뉴스가 없습니다.\n"
     except:
-        return "뉴스 연결 실패\n"
+        return "   └ 뉴스 로딩 실패\n"
 
 def get_stocks_and_news():
     result = ""
@@ -115,7 +87,7 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 🟢 [개인 추가!] 한국 주식 수급 데이터 가져오기
+        # 한국 주식 수급 데이터 (네이버 금융 활용)
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
@@ -132,8 +104,8 @@ def get_stocks_and_news():
             except:
                 pass
         
-        # 🔵 최신 뉴스 추가
-        result += get_naver_news(name, is_main=False)
+        # 구글 뉴스로 종목 뉴스 가져오기
+        result += get_google_news(name, count=1)
         result += "\n"
         
     return result
@@ -146,7 +118,7 @@ def send_telegram(message):
 if __name__ == "__main__":
     weather_info = get_weather()
     market_indices = get_market_indices()
-    eco_news = get_naver_news("경제 증시 시황", is_main=True)
+    eco_news = get_google_news("대한민국 경제 증시 시황", count=2)
     vip_stocks = get_stocks_and_news()
     
     briefing = f"🌅 <b>[에드워드 모닝 브리핑]</b>\n\n"
@@ -154,7 +126,7 @@ if __name__ == "__main__":
     briefing += f"────────────────\n"
     briefing += f"📊 <b>주요 시장 지수</b>\n{market_indices}\n"
     briefing += f"────────────────\n"
-    briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}"
+    briefing += f"📰 <b>주요 경제 뉴스</b>\n{eco_news}\n"
     briefing += f"────────────────\n"
     briefing += f"📈 <b>관심 종목 & 관련 뉴스</b>\n\n{vip_stocks}"
     
