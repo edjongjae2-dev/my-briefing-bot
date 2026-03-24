@@ -1,6 +1,5 @@
 import requests
 import os
-import xml.etree.ElementTree as ET
 import yfinance as yf
 import html
 from bs4 import BeautifulSoup
@@ -44,7 +43,7 @@ def get_weather():
             if time_str in ["09시", "12시", "15시", "18시", "21시"]:
                 temp = h['tempC']
                 desc = h['weatherDesc'][0]['value'].replace("Partly cloudy", "구름").replace("Clear", "맑음").replace("Cloudy", "흐림").replace("Overcast", "흐림").replace("Sunny", "맑음")
-                forecast += f"\n   ⏱️ {time_str}: {temp}°C ({desc})"
+                forecast += f"\n    ⏱️ {time_str}: {temp}°C ({desc})"
                 
         return f"🌡️ 현재 서울: {current}\n👇 <b>오늘의 시간별 예보</b>{forecast}"
     except:
@@ -67,48 +66,52 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-# 🌟 [핵심] 네이버 뉴스 검색결과에서 요약본을 바로 주워오는 마법!
 def get_naver_news(query, is_main=False):
-    url = f"https://search.naver.com/search.naver?where=news&query={query}"
+    # 검색 정확도를 높이기 위해 쿼리 조정
+    url = f"https://search.naver.com/search.naver?where=news&query={query}&sort=0"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
     news_result = ""
     try:
         res = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
-        articles = soup.select('.news_area')
+        # 뉴스 아이템을 잡는 선택자를 더 포괄적으로 변경
+        articles = soup.select('.news_wrap, .news_area')
         
-        count = 2 if is_main else 1 # 메인 뉴스는 2개, 종목 뉴스는 1개
+        count = 2 if is_main else 1
+        found = 0
         
-        for article in articles[:count]:
-            # 기사 제목과 링크 훔쳐오기
+        for article in articles:
+            if found >= count: break
+            
             title_tag = article.select_one('.news_tit')
             if not title_tag: continue
+            
             title = title_tag.text.strip()
             link = title_tag['href']
             
-            # 네이버 화면에 적혀있는 1줄 요약 훔쳐오기
-            desc_tag = article.select_one('.api_txt_lines.dsc_txt_wrap')
-            summary = desc_tag.text.strip() if desc_tag else "자세한 내용은 기사를 클릭하세요."
-            if len(summary) > 60:
-                summary = summary[:60] + "..."
+            # 요약 설명 부분 추출 (클래스명이 다를 수 있어 여러 개 시도)
+            desc_tag = article.select_one('.api_txt_lines.dsc_txt_wrap') or article.select_one('.news_dsc')
+            summary = desc_tag.text.strip() if desc_tag else "상세 내용은 기사를 확인하세요."
+            if len(summary) > 70:
+                summary = summary[:70] + "..."
                 
             clean_title = html.escape(title)
             clean_summary = html.escape(summary)
             
             if is_main:
                 news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
-                news_result += f"   💡 <i>{clean_summary}</i>\n\n"
+                news_result += f"    💡 <i>{clean_summary}</i>\n\n"
             else:
-                news_result += f"  └ <a href='{link}'>{clean_title}</a>\n"
-                news_result += f"    💡 <i>{clean_summary}</i>\n"
+                news_result += f"   └ <a href='{link}'>{clean_title}</a>\n"
+                news_result += f"     💡 <i>{clean_summary}</i>\n"
+            found += 1
                 
-        return news_result if news_result else "뉴스를 찾을 수 없습니다.\n"
+        return news_result if news_result else "뉴스 로딩 중 (검색 결과 없음)\n"
     except:
-        return "뉴스 로딩 실패\n"
+        return "뉴스 정보 연결 실패\n"
 
 def get_economy_news():
-    # 네이버에 '증시 경제 종합'이라고 검색한 결과를 가져옵니다.
-    return get_naver_news("증시 경제 종합", is_main=True)
+    return get_naver_news("경제 금융 주요뉴스", is_main=True)
 
 def get_stocks_and_news():
     result = ""
@@ -131,7 +134,7 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 한국 주식 수급(외국인/기관) 긁어오기
+        # 한국 주식 수급(개인/외국인/기관) 가져오기
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
@@ -142,19 +145,23 @@ def get_stocks_and_news():
                 rows = n_soup.select('table.type2 tr[onmouseover]')
                 if rows:
                     cols = rows[0].select('td')
-                    inst = cols[5].text.strip() 
-                    fore = cols[6].text.strip() 
-                    result += f"  👥 수급(최근영업일): 외국인 {fore} / 기관 {inst}\n"
+                    # 네이버 금융 수급 표 순서: 4(개인), 5(기관), 6(외국인)
+                    ant = cols[4].text.strip()   # 개인
+                    inst = cols[5].text.strip()  # 기관
+                    fore = cols[6].text.strip()  # 외국인
+                    result += f"   👥 수급: 개인 {ant} / 외국인 {fore} / 기관 {inst}\n"
             except:
                 pass
         
-        # 종목별 뉴스 1개 긁어오기 (네이버 뉴스 활용!)
         result += get_naver_news(name, is_main=False)
         result += "\n"
         
     return result
 
 def send_telegram(message):
+    if not token or not chat_id:
+        print("토큰이나 채팅 ID가 설정되지 않았습니다.")
+        return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     requests.post(url, json=payload)
