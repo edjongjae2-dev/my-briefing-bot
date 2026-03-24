@@ -1,12 +1,16 @@
 import requests
 import os
+import re
+import xml.etree.ElementTree as ET
 import yfinance as yf
 import html
 from bs4 import BeautifulSoup
+import time 
 
 # 🔐 금고 설정
 token = os.environ.get('TELEGRAM_TOKEN', '').strip()
 chat_id = os.environ.get('TELEGRAM_CHAT_ID', '').strip()
+gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
 
 # 🎯 나의 관심 리스트
 COMPANIES = {
@@ -66,45 +70,71 @@ def get_market_indices():
             result += f" 🔹 {name}: 확인 불가\n"
     return result
 
-def get_naver_news(query, is_main=False):
-    # 뉴스 탭 검색 결과 주소
-    url = f"https://search.naver.com/search.naver?where=news&query={query}&sm=tab_pge&sort=0"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.naver.com'
-    }
-    news_result = ""
+# 🌟 [핵심] 구글 대기실을 뚫고 진짜 기사 요약을 훔쳐오는 특급 기술!
+def get_smart_summary(news_title, news_link):
+    # 1. 플랜 A: 제미나이 AI 시도
+    if gemini_key:
+        try:
+            time.sleep(1)
+            prompt = f"경제 뉴스 제목: '{news_title}'. 이 뉴스가 미칠 영향을 딱 1줄(40자 이내)로 설명해."
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            headers = {'Content-Type': 'application/json'}
+            res = requests.post(api_url, json=payload, headers=headers, timeout=5)
+            
+            if res.status_code == 200:
+                answer = res.json()['candidates'][0]['content']['parts'][0]['text']
+                return answer.strip().replace('\n', ' ')
+        except:
+            pass 
+
+    # 2. 플랜 B: AI가 실패하면 진짜 언론사 홈페이지로 쳐들어가기!
     try:
-        res = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(res.text, 'html.parser')
+        r1 = requests.get(news_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        urls = re.findall(r'href=[\'"]?(https?://[^\'" >]+)', r1.text)
+        real_url = None
+        for u in urls:
+            if 'google.com' not in u and 'policies.google' not in u:
+                real_url = u
+                break
         
-        # 네이버 뉴스 제목을 가진 클래스 타겟팅
-        titles = soup.select('a.news_tit')
-        
-        count = 2 if is_main else 1
-        found = 0
-        
-        for title_tag in titles:
-            if found >= count: break
+        if real_url:
+            r2 = requests.get(real_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+            s2 = BeautifulSoup(r2.text, 'html.parser')
+            desc = s2.find('meta', attrs={'property': 'og:description'}) or s2.find('meta', attrs={'name': 'description'})
             
-            title = title_tag.text.strip()
-            link = title_tag['href']
-            
-            # 요약(desc) 생략하고 제목과 링크에 집중 (안정성 확보)
-            clean_title = html.escape(title)
-            
-            if is_main:
-                news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n\n"
-            else:
-                news_result += f"   └ <a href='{link}'>{clean_title}</a>\n"
-            found += 1
-                
-        return news_result if news_result else "📰 최신 뉴스 링크 확인 중...\n"
+            if desc and desc.get('content'):
+                summary = desc.get('content').strip()
+                if "Comprehensive" not in summary and len(summary) > 5:
+                    if len(summary) > 65:
+                        return summary[:65] + "..."
+                    return summary
     except:
-        return "뉴스 정보 연결 실패\n"
+        pass
+
+    return "자세한 내용은 링크를 클릭해 주세요."
 
 def get_economy_news():
-    return get_naver_news("경제 증시 시황", is_main=True)
+    url = "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
+        root = ET.fromstring(res.content)
+        items = root.findall('.//item')
+        
+        news_result = ""
+        for item in items[:2]:
+            title = item.find('title').text.strip()
+            clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
+            link = item.find('link').text.strip()
+            
+            summary = html.escape(get_smart_summary(clean_title, link))
+            
+            news_result += f"▪️ <a href='{link}'><b>{clean_title}</b></a>\n"
+            news_result += f"    💡 <i>{summary}</i>\n\n"
+        return news_result
+    except:
+        return "뉴스 로딩 중 에러.\n"
 
 def get_stocks_and_news():
     result = ""
@@ -127,7 +157,6 @@ def get_stocks_and_news():
             
         result += f"🏢 <b>{name}</b> (마감: {price_str})\n"
         
-        # 한국 주식 수급(개인/외국인/기관)
         if '.KS' in ticker or '.KQ' in ticker:
             try:
                 code = ticker.split('.')[0]
@@ -145,10 +174,23 @@ def get_stocks_and_news():
             except:
                 pass
         
-        # 종목 뉴스 추가
-        result += get_naver_news(name, is_main=False)
+        news_url = f"https://news.google.com/rss/search?q={name}&hl=ko&gl=KR&ceid=KR:ko"
+        try:
+            res = requests.get(news_url, timeout=10)
+            root = ET.fromstring(res.content)
+            item = root.findall('.//item')[0]
+            
+            title = item.find('title').text.strip()
+            clean_title = html.escape(re.sub(r' - [^ -]+$', '', title))
+            link = item.find('link').text.strip()
+            
+            summary = html.escape(get_smart_summary(clean_title, link))
+            
+            result += f"   └ <a href='{link}'>{clean_title}</a>\n"
+            result += f"     💡 <i>{summary}</i>\n"
+        except:
+            result += "   └ 관련 뉴스 로딩 실패\n"
         result += "\n"
-        
     return result
 
 def send_telegram(message):
