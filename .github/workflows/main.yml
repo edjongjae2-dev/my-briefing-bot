@@ -2,35 +2,49 @@ name: Daily Briefing
 
 on:
   schedule:
-    # 1. 한국 시간 오전 06:42 배달 (기존 7시에서 1시간 앞당김 + 지연 대비 20분 추가 확보)
-    # 영국 시간(UTC) 전날 21:42
+    # GitHub Actions 예약 실행은 UTC 기준입니다.
+    # 한국 시간 오전 06:42 = UTC 전날 21:42
     - cron: '42 21 * * *'
-    
-    # 2. 한국 시간 오후 03:17 배달 (기존 3시 40분에서 조금 앞당김)
-    # 영국 시간(UTC) 당일 06:17
+
+    # 한국 시간 오후 03:17 = UTC 당일 06:17
     - cron: '17 6 * * *'
-    
+
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+      - name: Show basic run info
+        run: |
+          echo "=== Daily Briefing workflow started ==="
+          echo "Triggered schedule: ${{ github.event.schedule }}"
+          echo "Current UTC time:"
+          date -u
+          echo "Python version:"
+          python --version
+          echo "Files in repository:"
+          ls -la
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 yfinance google-generativeai
+          pip install requests beautifulsoup4 yfinance
 
-      - name: Run Briefing Robot
+      - name: Run briefing robot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python briefing_robot.py
+        run: |
+          python briefing_robot.py
